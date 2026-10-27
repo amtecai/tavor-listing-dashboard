@@ -24,9 +24,11 @@ type AskOptions = {
   effort?: 'low' | 'medium' | 'high' | 'xhigh' | 'max'
   maxTokens?: number
   history?: Anthropic.Beta.Messages.BetaMessageParam[]
+  timeoutMs?: number
 }
 
-async function ask({ system, content, schema, tools, effort = 'high', maxTokens = 32_000, history = [] }: AskOptions): Promise<string> {
+async function ask({ system, content, schema, tools, effort = 'high', maxTokens = 32_000, history = [], timeoutMs = 240_000 }: AskOptions): Promise<string> {
+  const deadline = Date.now() + timeoutMs
   const messages: Anthropic.Beta.Messages.BetaMessageParam[] = [...history, { role: 'user', content }]
   // Server tools (web search/fetch) can pause a long turn; resume it until Claude finishes.
   for (let turn = 0; turn < 6; turn++) {
@@ -40,10 +42,10 @@ async function ask({ system, content, schema, tools, effort = 'high', maxTokens 
       ...(tools ? { tools } : {}),
       system,
       messages,
-    } as any)
+    } as any, { timeout: Math.max(5_000, deadline - Date.now()), maxRetries: 1 })
     const message = await stream.finalMessage()
     if (message.stop_reason === 'refusal') throw new Error(`Claude declined this request: ${(message as any).stop_details?.explanation ?? 'no reason given'}`)
-    if (message.stop_reason === 'pause_turn') {
+    if (message.stop_reason === 'pause_turn' && Date.now() < deadline - 20_000) {
       messages.push({ role: 'assistant', content: message.content as any })
       continue
     }
@@ -112,8 +114,8 @@ const DEV_SCHEMA = obj({
     items: obj({
       name: { ...str, description: 'Project name; use the street address if it has no published name' },
       address: { ...str, description: 'Street address and suburb, e.g. "259 Whitehorse Road, Balwyn"' },
-      type: { ...str, description: 'Two or three words, e.g. "Apartment Building", "Mixed-use", "Supermarket & Apartments"' },
-      description: { ...str, description: `At most 28 words in Tavor's voice, like: "${STYLE.development}"` },
+      type: { ...str, description: 'At most 18 characters, e.g. "Apartment Building", "Mixed-use", "Retail & Apartments"' },
+      description: { ...str, description: `18 to 24 words in Tavor's voice, like: "${STYLE.development}"` },
       imageUrl: { ...str, description: 'Direct URL of a render or photo of the project (an image file or og:image), or ""' },
       sourceUrl: str,
       distance: { ...str, description: 'Approximate distance from the property, e.g. "350 m"' },
@@ -133,6 +135,7 @@ For each project give a direct image URL (a render or photo file, or the page's 
     ],
     effort: 'high',
     maxTokens: 48_000,
+    timeoutMs: 230_000,
   })
   return lastJson(text).developments.slice(0, 4)
 }
@@ -142,7 +145,7 @@ For each project give a direct image URL (a render or photo file, or the page's 
 export async function writeDescription(facts: object): Promise<string> {
   return ask({
     system: `${VOICE}\nMatch the length and rhythm of this reference from Tavor's own summary:\n"""${STYLE.description}"""`,
-    content: `Write the "Opportunity Details" copy for this property: two paragraphs separated by a blank line, 105 to 125 words in total, the first slightly longer. First paragraph: the site, zoning, location and the main space. Second paragraph: the rest of the accommodation, parking, outlook and transport. Use only these facts:\n${JSON.stringify(facts, null, 2)}\n\nReturn only the two paragraphs.`,
+    content: `Write the "Opportunity Details" copy for this property: two paragraphs separated by a blank line. They print in two narrow columns of 8 lines each, so the first paragraph is 52 to 60 words and the second 40 to 50 words; never longer. First paragraph: the site, zoning, location and the main space. Second paragraph: the rest of the accommodation, parking, outlook and transport. Pick the facts a tenant cares about most; leave the rest out. Use only these facts:\n${JSON.stringify(facts, null, 2)}\n\nReturn only the two paragraphs.`,
     effort: 'high',
   })
 }

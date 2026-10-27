@@ -12,7 +12,7 @@ const img = (field: string, src: string | null, cls: string, alt: string) =>
 const paragraphs = (text: string) =>
   text.split(/\n\s*\n/).map((p) => p.trim()).filter(Boolean).map((p) => `<p>${esc(p)}</p>`).join('')
 
-const rows = (prefix: string, list: Row[]) =>
+export const rows = (prefix: string, list: Row[]) =>
   list.map((r, i) => `<div class="row"><span data-field="${prefix}.${i}.label">${esc(r.label)}</span><span class="v" data-field="${prefix}.${i}.value">${esc(r.value)}</span></div>`).join('')
 
 const header = `<img class="wordmark" src="/brand/wordmark.png" alt="Tavor Partners"><img class="mark" src="/brand/symbol.png" alt="">`

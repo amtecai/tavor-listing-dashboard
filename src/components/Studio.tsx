@@ -304,7 +304,7 @@ function Details({ draftId, listingId, fields, images, onVersion }: { draftId: s
     setMsg('')
     try {
       const r = await json<{ version: { id: string }; regenerated: boolean }>(await fetch(`/api/drafts/${draftId}/fields`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ fields: f, mode }) }))
-      setMsg(r.regenerated && mode === 'patch' ? 'Saved. Adding or removing rows rebuilt the layout from the details.' : 'Saved as a new version.')
+      setMsg(r.regenerated && mode === 'patch' ? 'Saved. Adding or removing a development or the floor plan rebuilt the layout from the details.' : 'Saved as a new version.')
       onVersion(r.version.id)
     } catch (err) {
       setMsg(err instanceof Error ? err.message : String(err))

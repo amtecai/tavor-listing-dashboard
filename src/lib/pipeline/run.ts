@@ -44,8 +44,17 @@ async function runStep(step: StepKey, l: ListingRow): Promise<Record<string, unk
     }
     case 'site': {
       const site = await siteFor((d.facts as Facts).address)
-      const transport = await transportNear(site.lat, site.lng).catch((err) => ({ error: String(err) }))
-      return { site, transport, sources: { ...d.sources, zoning: `Vicmap Planning: ${site.zoneName ?? 'no zone found'}${site.overlays.length ? `; overlays ${site.overlays.join(', ')}` : ''}`, parcel: site.source, transport: (transport as Transport).source ?? null } }
+      const facts = d.facts as Facts
+      let transport: Transport
+      try {
+        transport = await transportNear(site.lat, site.lng)
+      } catch {
+        // Overpass is busy at times; fall back to the modes the listing itself mentions.
+        const notes = `${facts.transportNotes} ${facts.features.join(' ')}`.toLowerCase()
+        const modes = ['train', 'tram', 'bus'].filter((m) => new RegExp(`\\b${m}`).test(notes))
+        transport = { summary: modes.map((m) => m[0].toUpperCase() + m.slice(1)).join(', '), nearest: {}, source: 'Listing text (OpenStreetMap was unavailable)' }
+      }
+      return { site, transport, sources: { ...d.sources, zoning: `Vicmap Planning: ${site.zoneName ?? 'no zone found'}${site.overlays.length ? `; overlays ${site.overlays.join(', ')}` : ''}`, parcel: site.source, transport: transport.source } }
     }
     case 'aerial': {
       const site = d.site as Site | undefined
@@ -144,6 +153,18 @@ export async function advance(listingId: string): Promise<boolean> {
     returning *`) as ListingRow[]
   if (!claimed) return false
   const step = claimed.step as StepKey
+  // A step that keeps dying (time limit, crash) must not loop forever.
+  const attempts = { ...((claimed.data.attempts as Record<string, number>) ?? {}), [step]: ((claimed.data.attempts as Record<string, number>)?.[step] ?? 0) + 1 }
+  await updateListing(listingId, { attempts })
+  if (attempts[step] > 3) {
+    const message = `${step} did not finish after 3 tries`
+    if (OPTIONAL.includes(step)) {
+      await updateListing(listingId, { warnings: [...((claimed.data.warnings as string[]) ?? []), message] }, { status: 'queued', step: nextStep(step)! })
+      return true
+    }
+    await updateListing(listingId, {}, { status: 'failed', step, error: message })
+    return false
+  }
   try {
     const patch = await runStep(step, claimed)
     const next = nextStep(step)

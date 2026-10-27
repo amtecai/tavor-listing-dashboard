@@ -2,7 +2,7 @@
 // attributes, so layout and design changes made in the designer survive a text or photo change.
 import * as cheerio from 'cheerio'
 import type { SummaryFields } from '../types'
-import { renderDocument } from './render'
+import { renderDocument, rows } from './render'
 
 const get = (obj: any, path: string) => path.split('.').reduce((o, k) => (o == null ? o : o[k]), obj)
 
@@ -15,16 +15,32 @@ function leafPaths(f: SummaryFields): string[] {
   return paths
 }
 
-const shape = (f: SummaryFields) => [f.details.length, f.demographics.length, f.developments.length, Boolean(f.floorPlan)].join('/')
+const shape = (f: SummaryFields) => [f.developments.length, Boolean(f.floorPlan)].join('/')
+
+// Tables whose rows can be added or removed in place.
+const TABLES = [
+  { key: 'details', selector: '.table.details' },
+  { key: 'demographics', selector: '.table.demo' },
+] as const
 
 /**
- * Returns the patched HTML, or null when the change adds or removes rows, developments or the
- * floor-plan page; those need a fresh render (the caller decides).
+ * Returns the patched HTML, or null when the change adds or removes developments or the
+ * floor-plan page; those need a fresh render (the caller decides). Added or removed table rows
+ * are redrawn inside their table, so the rest of the design stays.
  */
 export function patchHtml(html: string, before: SummaryFields, after: SummaryFields): string | null {
   if (shape(before) !== shape(after)) return null
   const $ = cheerio.load(html)
+  const redrawn = new Set<string>()
+  for (const { key, selector } of TABLES) {
+    if (before[key].length === after[key].length) continue
+    const table = $(selector)
+    if (table.length !== 1) return null
+    table.html(rows(key, after[key]))
+    redrawn.add(key)
+  }
   for (const path of leafPaths(after)) {
+    if (redrawn.has(path.split('.')[0])) continue
     const value = get(after, path)
     if (value === get(before, path)) continue
     $(`[data-field="${path}"]`).each((_, el) => {
